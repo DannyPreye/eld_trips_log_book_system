@@ -96,9 +96,23 @@ class RoutingService:
             # Extract polyline (OpenRouteService returns encoded polyline string when format=json)
             polyline = route.get("geometry", "")
 
+            # Extract all steps first (before splitting segments)
+            all_steps = []
+            if "segments" in route and len(route["segments"]) > 0:
+                for segment in route["segments"]:
+                    if "steps" in segment:
+                        for step in segment["steps"]:
+                            all_steps.append({
+                                "distance_miles": step["distance"] / 1609.34,
+                                "duration_hours": step["duration"] / 3600,
+                                "instruction": step.get("instruction", ""),
+                                "way_points": step.get("way_points", []),
+                            })
+
             # Extract segments
             segments = []
-            if "segments" in route and len(route["segments"]) > 0:
+            if "segments" in route and len(route["segments"]) > 1:
+                # Multiple segments from OpenRouteService - use them as-is with their steps
                 for segment in route["segments"]:
                     segment_data = {
                         "distance_miles": segment["distance"] / 1609.34,
@@ -119,30 +133,45 @@ class RoutingService:
                     segments.append(segment_data)
 
             # If no segments or only 1 segment, split route into smaller segments for better fuel stop detection
+            # But preserve the steps we extracted
             if not segments or len(segments) == 1:
                 # Split the route into smaller segments (every 200 miles) for better HOS compliance tracking
                 segment_size_miles = 200.0
                 num_segments = max(1, int(distance_miles / segment_size_miles) + (1 if distance_miles % segment_size_miles > 0 else 0))
 
                 if num_segments == 1:
-                    # If route is less than 200 miles, use single segment
+                    # If route is less than 200 miles, use single segment with all steps
                     segments = [{
                         "distance_miles": distance_miles,
                         "duration_hours": duration_hours,
-                        "steps": []
+                        "steps": all_steps  # Preserve all steps
                     }]
                 else:
-                    # Split into multiple segments
+                    # Split into multiple segments and distribute steps proportionally
                     segment_distance = distance_miles / num_segments
                     segment_duration = duration_hours / num_segments
 
                     segments = []
-                    for i in range(num_segments):
-                        segments.append({
-                            "distance_miles": segment_distance,
-                            "duration_hours": segment_duration,
-                            "steps": []
-                        })
+                    if all_steps:
+                        steps_per_segment = len(all_steps) / num_segments
+                        for i in range(num_segments):
+                            start_idx = int(i * steps_per_segment)
+                            end_idx = int((i + 1) * steps_per_segment) if i < num_segments - 1 else len(all_steps)
+                            segment_steps = all_steps[start_idx:end_idx]
+
+                            segments.append({
+                                "distance_miles": segment_distance,
+                                "duration_hours": segment_duration,
+                                "steps": segment_steps  # Include steps for this segment
+                            })
+                    else:
+                        # No steps available, create segments without steps
+                        for i in range(num_segments):
+                            segments.append({
+                                "distance_miles": segment_distance,
+                                "duration_hours": segment_duration,
+                                "steps": []
+                            })
 
             return {
                 "polyline": polyline,
