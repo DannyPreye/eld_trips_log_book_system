@@ -124,16 +124,25 @@ class StopSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Stop
-        fields = ["stop_type", "time", "location", "remarks"]
+        fields = ["stop_type", "time", "location", "latitude", "longitude", "remarks"]
 
     def to_representation(self, instance):
         """Convert to API response format."""
-        return {
+        result = {
             "type": instance.stop_type,
             "time": instance.time.isoformat(),
             "location": instance.location,
             "remarks": instance.remarks,
         }
+
+        # Add coordinates if available
+        if instance.latitude is not None and instance.longitude is not None:
+            result["coordinates"] = {
+                "lat": instance.latitude,
+                "lng": instance.longitude
+            }
+
+        return result
 
 
 class TripResponseSerializer(serializers.ModelSerializer):

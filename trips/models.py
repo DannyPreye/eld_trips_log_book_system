@@ -113,6 +113,8 @@ class Stop(models.Model):
     stop_type = models.CharField(max_length=20, choices=STOP_TYPE_CHOICES)
     time = models.DateTimeField()
     location = models.CharField(max_length=255, blank=True)
+    latitude = models.FloatField(null=True, blank=True, help_text="Latitude coordinate for map display")
+    longitude = models.FloatField(null=True, blank=True, help_text="Longitude coordinate for map display")
     remarks = models.TextField(blank=True)
 
     class Meta:

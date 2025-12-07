@@ -93,3 +93,4 @@ class GridMapper:
         return [cls.map_segments_to_grid(log) for log in daily_logs]
 
 
+

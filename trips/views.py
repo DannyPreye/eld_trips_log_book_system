@@ -183,7 +183,11 @@ class TripPlanView(APIView):
                 start_time=start_time,
                 current_cycle_hours=data["current_cycle_used_hours"],
                 pickup_location="Pickup Location",
-                dropoff_location="Dropoff Location"
+                dropoff_location="Dropoff Location",
+                pickup_coords=pickup_coords,
+                dropoff_coords=dropoff_coords,
+                route_polyline=route_data["polyline"],
+                total_route_distance_miles=route_data["distance_miles"]
             )
 
             # Save timeline events
@@ -204,6 +208,8 @@ class TripPlanView(APIView):
                     stop_type=stop_data["type"],
                     time=stop_data["time"],
                     location=stop_data.get("location", ""),
+                    latitude=stop_data.get("latitude"),
+                    longitude=stop_data.get("longitude"),
                     remarks=stop_data.get("remarks", "")
                 )
 

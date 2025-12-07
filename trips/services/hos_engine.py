@@ -3,7 +3,8 @@ Hours-of-Service (HOS) Compliance Engine.
 Implements US FMCSA rules for property-carrying drivers.
 """
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
+from .polyline_utils import get_coordinate_at_distance
 
 
 class HOSEngine:
@@ -37,7 +38,11 @@ class HOSEngine:
         start_time: datetime,
         current_cycle_hours: float,
         pickup_location: str = "",
-        dropoff_location: str = ""
+        dropoff_location: str = "",
+        pickup_coords: Optional[Tuple[float, float]] = None,
+        dropoff_coords: Optional[Tuple[float, float]] = None,
+        route_polyline: str = "",
+        total_route_distance_miles: float = 0.0
     ) -> Tuple[List[Dict], List[Dict]]:
         """
         Process route segments and generate HOS-compliant timeline.
@@ -48,11 +53,15 @@ class HOSEngine:
             current_cycle_hours: Hours already used in current 70-hour cycle
             pickup_location: Location name for pickup
             dropoff_location: Location name for dropoff
+            pickup_coords: Optional tuple of (lat, lng) for pickup location
+            dropoff_coords: Optional tuple of (lat, lng) for dropoff location
+            route_polyline: Encoded polyline string for calculating stop coordinates
+            total_route_distance_miles: Total route distance for coordinate calculation
 
         Returns:
             Tuple of (timeline_events, stops)
             timeline_events: List of events with start_time, end_time, status, location, remarks
-            stops: List of stops (breaks, fuel stops, etc.)
+            stops: List of stops (breaks, fuel stops, etc.) with coordinates
         """
         timeline = []
         stops = []
@@ -67,6 +76,16 @@ class HOSEngine:
 
         # Add pickup (ON_DUTY) - 1 hour assumption
         pickup_end = current_time + timedelta(hours=cls.PICKUP_DURATION_HOURS)
+
+        # Calculate pickup coordinates
+        pickup_lat, pickup_lng = None, None
+        if pickup_coords:
+            pickup_lat, pickup_lng = pickup_coords
+        elif route_polyline and total_route_distance_miles > 0:
+            coords = get_coordinate_at_distance(route_polyline, 0.0, total_route_distance_miles)
+            if coords:
+                pickup_lat, pickup_lng = coords
+
         timeline.append({
             "start_time": current_time,
             "end_time": pickup_end,
@@ -74,6 +93,17 @@ class HOSEngine:
             "location": pickup_location or "Pickup Location",
             "remarks": f"Pickup - On Duty Not Driving (1 hour - Property-carrying driver assumption)"
         })
+
+        # Add pickup stop
+        stops.append({
+            "type": "PICKUP",
+            "time": current_time,
+            "location": pickup_location or "Pickup Location",
+            "latitude": pickup_lat,
+            "longitude": pickup_lng,
+            "remarks": "Pickup location"
+        })
+
         cumulative_on_duty_hours += cls.PICKUP_DURATION_HOURS
         current_time = pickup_end
 
@@ -96,6 +126,14 @@ class HOSEngine:
                 fuel_stop_end = fuel_stop_time + timedelta(hours=0.5)  # 30 min fuel stop
                 actual_miles_since_fuel = miles_since_last_fuel
 
+                # Calculate fuel stop coordinates based on distance traveled
+                fuel_stop_lat, fuel_stop_lng = None, None
+                if route_polyline and total_route_distance_miles > 0:
+                    # Distance at fuel stop = total_distance (before adding current segment)
+                    coords = get_coordinate_at_distance(route_polyline, total_distance, total_route_distance_miles)
+                    if coords:
+                        fuel_stop_lat, fuel_stop_lng = coords
+
                 timeline.append({
                     "start_time": fuel_stop_time,
                     "end_time": fuel_stop_end,
@@ -107,6 +145,8 @@ class HOSEngine:
                     "type": "FUEL",
                     "time": fuel_stop_time,
                     "location": "Fuel Stop",
+                    "latitude": fuel_stop_lat,
+                    "longitude": fuel_stop_lng,
                     "remarks": f"Fuel stop - Required every 1,000 miles (~{actual_miles_since_fuel:.0f} miles)"
                 })
 
@@ -132,6 +172,13 @@ class HOSEngine:
                     break_start = current_time
                     break_end = break_start + timedelta(minutes=cls.BREAK_DURATION_MINUTES)
 
+                    # Calculate break coordinates based on distance traveled
+                    break_lat, break_lng = None, None
+                    if route_polyline and total_route_distance_miles > 0:
+                        coords = get_coordinate_at_distance(route_polyline, total_distance, total_route_distance_miles)
+                        if coords:
+                            break_lat, break_lng = coords
+
                     timeline.append({
                         "start_time": break_start,
                         "end_time": break_end,
@@ -143,6 +190,8 @@ class HOSEngine:
                         "type": "BREAK",
                         "time": break_start,
                         "location": "Rest Stop",
+                        "latitude": break_lat,
+                        "longitude": break_lng,
                         "remarks": "30-minute break"
                     })
 
@@ -171,6 +220,13 @@ class HOSEngine:
                 break_start = current_time
                 break_end = break_start + timedelta(hours=cls.REQUIRED_BREAK_HOURS)
 
+                # Calculate rest stop coordinates based on distance traveled
+                rest_lat, rest_lng = None, None
+                if route_polyline and total_route_distance_miles > 0:
+                    coords = get_coordinate_at_distance(route_polyline, total_distance, total_route_distance_miles)
+                    if coords:
+                        rest_lat, rest_lng = coords
+
                 timeline.append({
                     "start_time": break_start,
                     "end_time": break_end,
@@ -182,6 +238,8 @@ class HOSEngine:
                     "type": "REST",
                     "time": break_start,
                     "location": "Rest Area",
+                    "latitude": rest_lat,
+                    "longitude": rest_lng,
                     "remarks": break_reason
                 })
 
@@ -208,6 +266,16 @@ class HOSEngine:
 
         # Add dropoff (ON_DUTY) - 1 hour assumption
         dropoff_end = current_time + timedelta(hours=cls.DROPOFF_DURATION_HOURS)
+
+        # Calculate dropoff coordinates
+        dropoff_lat, dropoff_lng = None, None
+        if dropoff_coords:
+            dropoff_lat, dropoff_lng = dropoff_coords
+        elif route_polyline and total_route_distance_miles > 0:
+            coords = get_coordinate_at_distance(route_polyline, total_route_distance_miles, total_route_distance_miles)
+            if coords:
+                dropoff_lat, dropoff_lng = coords
+
         timeline.append({
             "start_time": current_time,
             "end_time": dropoff_end,
@@ -215,6 +283,17 @@ class HOSEngine:
             "location": dropoff_location or "Dropoff Location",
             "remarks": f"Dropoff - On Duty Not Driving (1 hour - Property-carrying driver assumption)"
         })
+
+        # Add dropoff stop
+        stops.append({
+            "type": "DROPOFF",
+            "time": current_time,
+            "location": dropoff_location or "Dropoff Location",
+            "latitude": dropoff_lat,
+            "longitude": dropoff_lng,
+            "remarks": "Dropoff location"
+        })
+
         cumulative_on_duty_hours += cls.DROPOFF_DURATION_HOURS
 
         return timeline, stops
